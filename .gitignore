@@ -1,0 +1,48 @@
+# Data files (not included per competition rules)
+data/
+*.rds
+*.RData
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model artifacts (too large for git)
+*.pkl
+*.pickle
+*.h5
+*.keras
+*.joblib
+
+# Optuna
+*.db
+*.sqlite3
+
+# Logs
+*.log
+optuna_*.txt
