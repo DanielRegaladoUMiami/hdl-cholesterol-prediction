@@ -25,8 +25,11 @@
 - [Competition Overview](#competition-overview)
 - [Dataset](#dataset)
 - [Repository Structure](#repository-structure)
-- [Methodology](#methodology)
-- [Results](#results)
+- [Exploratory Data Analysis](#exploratory-data-analysis)
+- [Feature Engineering](#feature-engineering)
+- [Model Selection & Results](#model-selection--results)
+- [Residual Diagnostics](#residual-diagnostics)
+- [Interpretability (SHAP)](#interpretability-shap)
 - [Reproducibility](#reproducibility)
 - [License](#license)
 
@@ -47,12 +50,7 @@ The [2026 ASA South Florida Student Data Challenge](https://github.com/luminwin/
 | Train | 1,000 | 95 | None |
 | Test  | 200 | 95 | None |
 
-The 95 predictor variables are sourced from the 2024 NHANES cycle and span four domains:
-
-- **Demographics** — age, gender, race/ethnicity, income-to-poverty ratio, marital status
-- **Anthropometrics** — BMI, waist circumference
-- **Dietary intake** — 24-hour recall data (macronutrients, micronutrients, food diversity)
-- **Behavioral indicators** — alcohol consumption frequency and quantity
+The 95 predictor variables are sourced from the 2024 NHANES cycle and span four domains: **demographics** (age, gender, race/ethnicity, income-to-poverty ratio, marital status), **anthropometrics** (BMI, waist circumference), **dietary intake** (24-hour recall data covering macronutrients and micronutrients), and **behavioral indicators** (alcohol consumption frequency and quantity).
 
 The target variable (`LBDHDD_outcome`) is a noise-adjusted version of Direct HDL-Cholesterol (mg/dL), approximately normally distributed (mean = 54.73, median = 54.16, skewness = 0.376).
 
@@ -65,6 +63,7 @@ The target variable (`LBDHDD_outcome`) is a noise-adjusted version of Direct HDL
 ├── requirements.txt                   # Python dependencies
 ├── .gitignore                         # Git ignore rules
 ├── LICENSE                            # MIT License
+├── figures/                           # All visualizations used in this README
 ├── notebooks/
 │   └── Submission_DanielRegalado_MiguelRocha.ipynb   # Full analysis notebook
 ├── reports/
@@ -73,30 +72,72 @@ The target variable (`LBDHDD_outcome`) is a noise-adjusted version of Direct HDL
     └── pred.csv                                       # Final test predictions (200 rows)
 ```
 
-## Methodology
+---
 
-A full technical writeup is available in [`METHODS.md`](METHODS.md). The key stages are summarized below.
+## Exploratory Data Analysis
 
-### 1. Exploratory Data Analysis
+### Target Distribution
 
-EDA revealed that waist circumference (*r* = -0.596) and BMI (*r* = -0.484) are the strongest linear predictors, confirming central adiposity as the primary driver of HDL variation. Gender showed a strong positive association (*r* = +0.523), with females exhibiting systematically higher HDL levels (mean 59.2 vs. 49.8 mg/dL). Dietary variables displayed weak individual correlations (|*r*| < 0.19), suggesting their effects operate through interactions rather than additive relationships.
+The target variable is approximately normal with mild right skew. The Q-Q plot confirms no need for target transformation.
 
-### 2. Feature Engineering
+<p align="center">
+  <img src="figures/target_distribution.png" alt="Target Distribution" width="100%">
+</p>
 
-A custom sklearn-compatible transformer (`FeatureEngineer`) generates 15 engineered features across four categories, all fitted exclusively on training data to prevent leakage:
+### Correlation Structure
+
+Waist circumference (*r* = −0.596) and BMI (*r* = −0.484) are the strongest linear predictors. Gender shows a strong positive association (*r* = +0.523). Dietary variables are uniformly weak in isolation (|*r*| < 0.19).
+
+<p align="center">
+  <img src="figures/correlation_heatmap.png" alt="Correlation Heatmap" width="100%">
+</p>
+
+### HDL by Sex and Race/Ethnicity
+
+Females exhibit systematically higher HDL levels (mean 59.2 vs. 49.8 mg/dL for males), a ~9.4 mg/dL gap consistent with established endocrine mechanisms. Race/ethnicity shows more subtle variation.
+
+<p align="center">
+  <img src="figures/hdl_by_subgroup.png" alt="HDL by Subgroup" width="100%">
+</p>
+
+### Key Bivariate Relationships
+
+BMI shows a clear negative linear trend with HDL (*r* = −0.484), with diminishing marginal effects above BMI ~35.
+
+<p align="center">
+  <img src="figures/hdl_vs_bmi.png" alt="HDL vs BMI" width="100%">
+</p>
+
+Waist circumference is the single strongest predictor (*r* = −0.596), and the relationship is strongly modulated by sex — motivating interaction-based feature engineering.
+
+<p align="center">
+  <img src="figures/waist_vs_hdl.png" alt="Waist vs HDL stratified by Sex" width="100%">
+</p>
+
+---
+
+## Feature Engineering
+
+A custom sklearn-compatible transformer (`FeatureEngineer`) generates 15 engineered features with leakage-safe design (all thresholds computed in `fit()` on training data only):
 
 | Category | Features | Rationale |
 |----------|----------|-----------|
-| Sex interactions | Waist x Sex, BMI x Sex, Age x Sex, Alcohol x Sex, Race x Sex, Income x Sex, Food Diversity x Sex, Fish x Sex | Capture gender-dependent effects from EDA |
-| Body composition | Waist x BMI, Age x Waist | Model adiposity-age interactions |
-| Polynomial terms | Waist², BMI², Age² | Capture nonlinear relationships |
-| Log transforms | Skewed dietary variables | Normalize right-skewed distributions |
+| **Sex interactions** | Waist × Sex, BMI × Sex, Age × Sex, Alcohol × Sex, Race × Sex, Income × Sex, Food Diversity × Sex, Fish × Sex | Capture gender-dependent effects from EDA |
+| **Body composition** | Waist × BMI, Age × Waist | Model adiposity-age interactions |
+| **Polynomial terms** | Waist², BMI², Age² | Capture nonlinear relationships |
+| **Log transforms** | Skewed dietary variables | Normalize right-skewed distributions |
 
-Permutation importance analysis identified and removed 37 features (34 raw + 3 engineered) with zero or negative contribution, reducing dimensionality from 107 to 73 features.
+Permutation importance then identified and removed **37 noise features** (34 raw + 3 engineered) with zero or negative contribution, reducing dimensionality from 107 → **73 features**.
 
-### 3. Model Selection
+---
 
-Eight model configurations were compared using 5-fold cross-validation. Hyperparameters for tree-based models were optimized via Optuna Bayesian optimization.
+## Model Selection & Results
+
+Eight model configurations were compared using 5-fold cross-validation. Hyperparameters for tree-based models were optimized via **Optuna Bayesian optimization** (50+ trials each).
+
+<p align="center">
+  <img src="figures/model_comparison.png" alt="Model Comparison" width="85%">
+</p>
 
 | Model | CV RMSE | CV MAE | CV R² |
 |-------|---------|--------|-------|
@@ -109,38 +150,72 @@ Eight model configurations were compared using 5-fold cross-validation. Hyperpar
 | NN with Dropout | 5.7620 | — | — |
 | NN Standard | 6.8587 | — | — |
 
-### 4. Interpretability
+**CatBoost** achieved the best performance, outperforming even stacking ensembles. This indicates the three gradient boosting variants capture overlapping rather than complementary patterns. Neural networks underperformed due to the moderate sample-to-feature ratio (1,000 obs / 73 features), confirming gradient boosting as the preferred approach for structured tabular data at this scale.
 
-SHAP analysis of the final CatBoost model reveals that engineered interaction features account for 12 of the top 20 predictors by mean |SHAP| value, validating the EDA-guided feature engineering strategy.
+---
 
-## Results
+## Residual Diagnostics
 
-The final CatBoost model achieves **CV RMSE = 4.5339** and **R² = 0.7466** on 5-fold cross-validated out-of-fold predictions. Residual diagnostics confirm well-calibrated predictions: errors are centered near zero (mean = +0.054), approximately normal (skewness = 0.171), and only 3.3% of observations exceed the 2-sigma threshold. Prediction accuracy is highest in the normal HDL range (50–60 mg/dL) and degrades at extremes (>70 mg/dL), consistent with unobserved genetic and medication factors absent from the feature space.
+Residual analysis on cross-validated out-of-fold predictions confirms a well-calibrated model: errors are centered near zero (mean = +0.054), approximately normal (skewness = 0.171), and only 3.3% of observations exceed the ±2σ threshold.
 
-**Test prediction summary:** mean = 54.41 mg/dL, std = 7.60, range = [40.15, 75.31] mg/dL.
+<p align="center">
+  <img src="figures/residual_diagnostics.png" alt="Residual Diagnostics" width="100%">
+</p>
+
+Prediction accuracy is highest in the normal HDL range (50–60 mg/dL) and degrades at extremes (>70 mg/dL), consistent with unobserved genetic and medication factors absent from the NHANES survey variables.
+
+---
+
+## Interpretability (SHAP)
+
+### Global Feature Importance
+
+SHAP analysis reveals that **Gender** and **Waist Circumference** dominate the model. Engineered interaction features account for **12 of the top 20** predictors, validating the EDA-guided feature engineering strategy.
+
+<p align="center">
+  <img src="figures/shap_bar.png" alt="SHAP Feature Importance (Top 30)" width="70%">
+</p>
+
+### SHAP Beeswarm Plot
+
+The beeswarm plot shows the direction and magnitude of each feature's impact across all observations. Red indicates high feature values, blue indicates low values.
+
+<p align="center">
+  <img src="figures/shap_beeswarm.png" alt="SHAP Beeswarm Plot" width="55%">
+</p>
+
+Key patterns: high waist circumference drives HDL **down** (blue dots on right = low waist → higher HDL), while female gender (RIAGENDR = 0) pushes HDL **up**. Interaction terms like `Age_x_Sex` and `Alcohol_x_Sex` capture conditional effects invisible to raw features alone.
+
+### Local Explanations (SHAP Waterfall)
+
+Individual predictions decomposed into feature contributions. Left: the most accurate prediction in the dataset. Right: a median-error case showing how features compound to push predictions above the population mean.
+
+<p align="center">
+  <img src="figures/shap_waterfall_best.png" alt="SHAP Waterfall - Best Prediction" width="48%">
+  <img src="figures/shap_waterfall_median.png" alt="SHAP Waterfall - Median Case" width="48%">
+</p>
+
+---
 
 ## Reproducibility
 
 ### Requirements
 
 ```bash
-# Clone the repository
-git clone https://github.com/<your-username>/hdl-cholesterol-prediction.git
+git clone https://github.com/DanielRegaladoUMiami/hdl-cholesterol-prediction.git
 cd hdl-cholesterol-prediction
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ### Running the Analysis
-
-Open and execute the Jupyter notebook:
 
 ```bash
 jupyter notebook notebooks/Submission_DanielRegalado_MiguelRocha.ipynb
 ```
 
 > **Note:** The training and test datasets are provided by the competition organizers and are not included in this repository. See the [competition page](https://github.com/luminwin/ASASF) for data access.
+
+---
 
 ## License
 
